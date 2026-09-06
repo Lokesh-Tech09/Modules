@@ -4,11 +4,17 @@ __pycache__/
 .pytest_cache/
 member2_verify/temp/
 *.log
+.DS_Store
 
-# Module 3 - Blockchain
+# Environment & Secrets
+.env
+.env.local
 member3_blockchain/.env
-member3_blockchain/offchain_store.db
-member3_blockchain/*.db
-member3_blockchain/*.sqlite*
 member3_blockchain/*.key
 member3_blockchain/wallet_secrets/
+
+# Databases
+*.db
+*.sqlite*
+member3_blockchain/offchain_store.db
+
