@@ -271,3 +271,61 @@ class TestModule1Adapter:
         assert "status"         in d
         assert "face_embedding" in d
         assert len(d["face_embedding"]) == 512
+
+
+class TestSocialScraper:
+    """Social media scraper unit tests."""
+
+    def test_platform_detection(self):
+        from member2_verify import SocialScraper
+        scraper = SocialScraper()
+        assert scraper.detect_platform("https://www.instagram.com/p/C123xyz/") == "instagram"
+        assert scraper.detect_platform("https://www.linkedin.com/posts/activity-12345") == "linkedin"
+        assert scraper.detect_platform("https://x.com/user/status/123456") == "twitter"
+        assert scraper.detect_platform("https://twitter.com/user/status/123456") == "twitter"
+        assert scraper.detect_platform("https://facebook.com/post/123") == "facebook"
+        assert scraper.detect_platform("https://example.com/blog/article") == "web"
+
+    def test_fallback_social_post_structure(self):
+        from member2_verify import SocialScraper
+        scraper = SocialScraper()
+        post = scraper._fallback_social_post("https://instagram.com/p/test", "instagram")
+        assert post.platform == "instagram"
+        assert post.post_url == "https://instagram.com/p/test"
+        assert post.image_url is None
+        d = post.to_dict()
+        assert d["platform"] == "instagram"
+        assert "url" in d
+        assert "caption" in d
+
+    def test_extract_social_posts_convenience(self):
+        from member2_verify import extract_social_posts
+        results = extract_social_posts(["https://unknown-site-12345.org/test"])
+        assert len(results) == 1
+        assert results[0]["platform"] == "web"
+
+
+class TestWebcamMock:
+    """Webcam capture mock mode tests."""
+
+    def test_mock_capture_creates_file(self, tmp_path):
+        from member1_face.capture_webcam import mock_capture
+        test_out = str(tmp_path / "mock_face.jpg")
+        result = mock_capture(output_path=test_out)
+        assert os.path.exists(result)
+        assert os.path.getsize(result) > 0
+
+
+class TestContractDeploymentDryRun:
+    """Solidity contract deployment dry-run test."""
+
+    def test_deploy_contract_dry_run(self):
+        from member3_blockchain.deploy_contract import deploy_contract
+        addr = deploy_contract(
+            rpc_url="https://mock.rpc",
+            private_key="",
+            dry_run=True,
+        )
+        assert addr.startswith("0x")
+        assert len(addr) == 42
+

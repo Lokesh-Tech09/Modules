@@ -26,6 +26,14 @@ import sys
 import time
 from typing import Any, Dict, Optional
 
+# Ensure UTF-8 output on Windows consoles
+if hasattr(sys.stdout, "reconfigure"):
+    try:
+        sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+        sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+    except Exception:
+        pass
+
 # ── Project root on path ──────────────────────────────────────────────────
 PROJECT_ROOT = os.path.dirname(os.path.abspath(__file__))
 MODULE1_DIR  = os.path.join(PROJECT_ROOT, "member1_face")
@@ -354,7 +362,12 @@ def run_module3_reverify(
 # Tamper Test
 # ─────────────────────────────────────────────────────────────────────────────
 
-def run_tamper_test(upload_result: Dict, verification_result: Dict):
+def run_tamper_test(
+    upload_result: Dict,
+    verification_result: Dict,
+    chain_client=None,
+    offchain_store=None,
+) -> bool:
     section(0, "TAMPER TEST (DEMO)")
     print(f"  {YELLOW}Modifying post data after anchoring...{RESET}")
 
@@ -373,10 +386,9 @@ def run_tamper_test(upload_result: Dict, verification_result: Dict):
 
     try:
         from member3_blockchain import reverify_record
-        from member3_blockchain.config import load_config_from_env
     except ImportError as e:
         fail("Module 3 import", str(e))
-        return
+        return False
 
     reference_id = upload_result.get("reference_id", "")
 
@@ -384,10 +396,12 @@ def run_tamper_test(upload_result: Dict, verification_result: Dict):
         reverif = reverify_record(
             reference_id=reference_id,
             current_verification_result=tampered,
+            chain_client=chain_client,
+            offchain_store=offchain_store,
         )
     except Exception as exc:
         fail("Tamper reverify error", str(exc))
-        return
+        return False
 
     result_dict  = reverif.to_dict()
     stored_hash  = result_dict.get("on_chain_hash", "")
@@ -399,9 +413,81 @@ def run_tamper_test(upload_result: Dict, verification_result: Dict):
     kv("Hash Match",   "NO" if not match else "YES (unexpected)")
 
     if not match:
-        print(f"\n  {RED}{BOLD}❌  TAMPERED — Data was modified after anchoring!{RESET}")
+        print(f"\n  {RED}{BOLD}✓  Tamper successfully detected! Data was altered after anchoring.{RESET}")
+        return True
     else:
         print(f"\n  {YELLOW}{BOLD}⚠  Hash unexpectedly matched. Check tamper logic.{RESET}")
+        return False
+
+
+def run_synthetic_tamper_demo(chain_client=None, offchain_store=None) -> bool:
+    section(6, "TAMPER DETECTION DEMO")
+    print(f"  {DIM}(Simulating with a verified test record){RESET}")
+
+    from member3_blockchain import MockChainClient, OffchainStore, reverify_record, upload_verification_record
+    from member3_blockchain.config import BlockchainConfig
+
+    mock_rec = {
+        "schema_version": "2.0",
+        "status": "verified",
+        "match": {
+            "url": "https://example.com/posts/genuine-post-123",
+            "image_url": "https://cdn.example.com/photo.jpg",
+            "local_image_path": None,
+            "caption": "Summit selfie at Goa Hackathon! #ConsentedVerification",
+            "metadata": {"platform": "instagram"},
+        },
+        "verification": {
+            "raw_similarity": 0.971,
+            "calibrated_confidence": 0.94,
+            "low_confidence_detection": False,
+        },
+        "consent": {
+            "consent_scope": "self_verification",
+            "consent_confirmed": True,
+        },
+    }
+
+    if chain_client is None:
+        chain_client = MockChainClient(network="sepolia-testnet")
+    if offchain_store is None:
+        offchain_store = OffchainStore(db_path=":memory:")
+    config = BlockchainConfig(network=getattr(chain_client, "network", "sepolia-testnet"))
+
+    print(f"  1. Minting record on mockchain:")
+    up = upload_verification_record(mock_rec, config=config, chain_client=chain_client, offchain_store=offchain_store)
+    ref = up.reference_id
+    rec_hash = up.record_hash
+    kv("Ref", ref)
+    kv("Canonical SHA-256", rec_hash)
+
+    print(f"\n  2. Tampering record: altering post URL...")
+    import copy
+    tampered = copy.deepcopy(mock_rec)
+    tampered["match"]["url"] = "https://example.com/posts/altered-post-999"
+    kv("From", "https://example.com/posts/genuine-post-123")
+    kv("To",   "https://example.com/posts/altered-post-999")
+
+    print(f"\n  3. Re-verifying tampered record against blockchain...")
+    t_res = reverify_record(
+        reference_id=ref,
+        current_verification_result=tampered,
+        chain_client=chain_client,
+        offchain_store=offchain_store,
+    )
+    t_dict = t_res.to_dict()
+    orig_h = t_dict.get("on_chain_hash", "")
+    new_h = t_dict.get("recomputed_hash", "")
+    if not t_dict.get("match"):
+        ok("Tamper successfully detected!", "")
+        kv("Original hash",   orig_h)
+        kv("Recomputed hash", new_h)
+        kv("Status",          f"{RED}{BOLD}TAMPER_DETECTED{RESET}")
+        return True
+    else:
+        warn("Status", "Tamper not detected")
+        return False
+
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -449,8 +535,16 @@ def parse_args():
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     parser.add_argument(
-        "--image", "-i", required=True,
-        help="Path to input face image.",
+        "--image", "-i", default=None,
+        help="Path to input face image (default: member1_face/data/input/input.jpg).",
+    )
+    parser.add_argument(
+        "--webcam", action="store_true",
+        help="Capture live face photo from webcam before running pipeline.",
+    )
+    parser.add_argument(
+        "--mock-camera", action="store_true",
+        help="Simulate camera capture without hardware camera.",
     )
     parser.add_argument(
         "--candidates", "-c",
@@ -471,7 +565,11 @@ def parse_args():
     )
     parser.add_argument(
         "--tamper-test", action="store_true",
-        help="Run tamper demonstration after successful verification.",
+        help="Run tamper demonstration after verification.",
+    )
+    parser.add_argument(
+        "--demo-anchor", action="store_true",
+        help="Simulate successful verification for blockchain anchoring and re-verification demo.",
     )
     parser.add_argument(
         "--no-search", action="store_true",
@@ -481,6 +579,22 @@ def parse_args():
 
 
 async def _async_main(args):
+    # Handle camera input modes
+    if args.mock_camera:
+        from member1_face.capture_webcam import mock_capture
+        args.image = mock_capture()
+    elif args.webcam:
+        from member1_face.capture_webcam import capture_from_camera, mock_capture
+        captured = capture_from_camera()
+        args.image = captured or mock_capture()
+    elif not args.image:
+        default_img = os.path.join(MODULE1_DIR, "data", "input", "input.jpg")
+        if os.path.exists(default_img):
+            args.image = default_img
+        else:
+            print(f"\n{RED}Error: No input image specified. Provide --image <path> or use --webcam / --mock-camera.{RESET}")
+            return 1
+
     banner("VERIFACE  ·  Face Identification & Blockchain Verification")
     print(f"\n  {DIM}HH Goa 2026 — Task 3 Demo{RESET}")
     print(f"  {DIM}Input: {args.image}{RESET}")
@@ -511,11 +625,9 @@ async def _async_main(args):
     # ── Module 2 ─────────────────────────────────────────────────────────────
     m2 = await run_module2(m1, discovered_urls, args.image)
 
-    # If Module 2 didn't verify anything, we still proceed to Module 3 with
-    # whatever result we have so the blockchain/hashing demo can run.
-    # We mark it clearly as unverified.
+    # If Module 2 didn't verify anything, we still build record
     if m2 is None:
-        warn("Module 2", "Verification did not complete — building minimal record for blockchain demo")
+        warn("Module 2", "Verification did not complete — building minimal record")
         m2 = {
             "schema_version": "2.0",
             "status": "not_verified",
@@ -530,58 +642,110 @@ async def _async_main(args):
             "consent": {"consent_scope": "self_verification", "consent_confirmed": True},
         }
 
+    m1_candidate = m1.get("candidate", "unknown")
+    m1_sim = float(m1.get("similarity", 0.0))
+
+    # If --demo-anchor was passed, promote record to verified for live blockchain demonstration
+    if args.demo_anchor and m2.get("status") != "verified":
+        warn("Demo Mode", "--demo-anchor active: generating verified candidate record for blockchain demonstration")
+        m2 = {
+            "schema_version": "2.0",
+            "status": "verified",
+            "input": {"image_path": args.image},
+            "match": {
+                "url": discovered_urls[0] if discovered_urls else "https://example.com/posts/verified-profile",
+                "image_url": "https://example.com/images/verified_face.jpg",
+                "local_image_path": None,
+                "caption": f"Verified identity post for {m1_candidate}",
+                "metadata": {"platform": "demo", "candidate": m1_candidate},
+            },
+            "verification": {
+                "raw_similarity": m1_sim,
+                "calibrated_confidence": round(m1_sim * 0.95, 4),
+                "low_confidence_detection": False,
+            },
+            "checked": {
+                "urls_provided": len(discovered_urls),
+                "urls_deduplicated": len(discovered_urls),
+                "urls_fetched": len(discovered_urls),
+            },
+            "consent": {"consent_scope": "self_verification", "consent_confirmed": True},
+        }
+
     # ── Module 3: Create shared instances for mock-chain continuity ───────────
     chain_client, offchain_store = create_shared_module3_instances()
 
-    # ── Module 3: Upload ──────────────────────────────────────────────────────
-    if chain_client and offchain_store:
-        upload_obj = upload_with_shared_instances(m2, chain_client, offchain_store)
-        if upload_obj:
-            m3_upload = upload_obj.to_dict()
-            # Print same output as run_module3_upload
-            section(5, "BLOCKCHAIN ANCHORING")
-            config_net = chain_client.network
-            record_hash = m3_upload.get("record_hash", "")
-            ref_id      = m3_upload.get("reference_id", "")
-            chain_info  = m3_upload.get("chain", {})
-            kv("Mode",         f"{YELLOW}DEVELOPMENT / SIMULATION (MockChain){RESET}")
-            kv("Network",      config_net)
-            print(f"\n  {DIM}Generating SHA-256 fingerprint...{RESET}")
-            ok("Record Hash",  f"{record_hash[:32]}...{record_hash[-8:]}")
-            kv("Block number", chain_info.get("block_number", ""))
-            print(f"\n  {DIM}Submitting blockchain transaction...{RESET}")
-            ok("Transaction ID", ref_id)
-            ok("Status",         "ANCHORED")
+    m3_upload = None
+    m3_reverif = None
+
+    # Module 3 strictly permits anchoring only for 'verified' records
+    if m2.get("status") == "verified":
+        if chain_client and offchain_store:
+            upload_obj = upload_with_shared_instances(m2, chain_client, offchain_store)
+            if upload_obj:
+                m3_upload = upload_obj.to_dict()
+                section(5, "BLOCKCHAIN ANCHORING")
+                config_net = getattr(chain_client, "network", "sepolia-testnet")
+                record_hash = m3_upload.get("record_hash", "")
+                ref_id      = m3_upload.get("reference_id", "")
+                chain_info  = m3_upload.get("chain", {})
+                kv("Mode",         f"{YELLOW}DEVELOPMENT / SIMULATION (MockChain){RESET}")
+                kv("Network",      config_net)
+                print(f"\n  {DIM}Generating SHA-256 fingerprint...{RESET}")
+                ok("Record Hash",  f"{record_hash[:32]}...{record_hash[-8:]}")
+                kv("Block number", chain_info.get("block_number", ""))
+                print(f"\n  {DIM}Submitting blockchain transaction...{RESET}")
+                ok("Transaction ID", ref_id)
+                ok("Status",         "ANCHORED")
+            else:
+                m3_upload = run_module3_upload(m2)
         else:
             m3_upload = run_module3_upload(m2)
+
+        if m3_upload:
+            m3_reverif = run_module3_reverify(m3_upload, m2, chain_client, offchain_store)
     else:
-        m3_upload = run_module3_upload(m2)
-
-    if m3_upload is None:
-        print(f"\n{RED}Pipeline aborted at Module 3 upload.{RESET}")
-        return 1
-
-    # ── Module 3: Re-verify ───────────────────────────────────────────────────
-    m3_reverif = run_module3_reverify(m3_upload, m2, chain_client, offchain_store)
+        section(5, "BLOCKCHAIN ANCHORING")
+        warn("Status", "SKIPPED")
+        warn("Reason", f"Verification status is '{m2.get('status')}' (must be 'verified' to anchor)")
 
     # ── Final Result ──────────────────────────────────────────────────────────
     print(f"\n{BOLD}{CYAN}{'='*60}{RESET}")
     if m3_reverif and m3_reverif.get("match"):
-        print(f"  {GREEN}{BOLD}✅  FINAL RESULT: VERIFIED{RESET}")
-    elif m3_reverif and not m3_reverif.get("match"):
-        print(f"  {RED}{BOLD}❌  FINAL RESULT: TAMPERED (unexpected at this stage){RESET}")
+        print(f"  {GREEN}{BOLD}✅  FINAL RESULT: VERIFIED & ANCHORED{RESET}")
+    elif m2.get("status") == "verified" and m3_upload:
+        print(f"  {GREEN}{BOLD}✅  FINAL RESULT: ANCHORED{RESET}")
     else:
-        print(f"  {YELLOW}{BOLD}⚠   FINAL RESULT: INCOMPLETE{RESET}")
+        print(f"  {YELLOW}{BOLD}⚠   FINAL RESULT: {m2.get('status', 'NOT_VERIFIED').upper()}{RESET}")
+        print(f"  {DIM}Face match found ({m1_candidate}), but claimed URLs did not pass verification.{RESET}")
+        print(f"  {DIM}Tip: Pass --demo-anchor to simulate full verified anchoring demo.{RESET}")
     print(f"{BOLD}{CYAN}{'='*60}{RESET}")
 
     elapsed = time.time() - start
     print(f"\n  {DIM}Total time: {elapsed:.1f}s{RESET}")
 
-    # ── Optional Tamper Test ──────────────────────────────────────────────────
+    # ── Tamper Test ───────────────────────────────────────────────────────────
+    tamper_passed = False
     if args.tamper_test:
         print(f"\n{'='*60}")
-        run_tamper_test(m3_upload, m2)
+        if m3_upload:
+            tamper_passed = run_tamper_test(m3_upload, m2, chain_client, offchain_store)
+        else:
+            tamper_passed = run_synthetic_tamper_demo(chain_client, offchain_store)
         print(f"{'='*60}")
+
+    # ── Pipeline Complete Summary Table ───────────────────────────────────────
+    print(f"\n{BOLD}{'='*60}{RESET}")
+    print(f"  {BOLD}PIPELINE COMPLETE{RESET}")
+    print(f"{BOLD}{'='*60}{RESET}\n")
+    print(f"  Face scan:           COMPLETED")
+    print(f"  Identification:      MATCH ({m1_candidate}, {m1_sim:.4f})")
+    print(f"  Web discovery:       {len(discovered_urls)} URLs found")
+    print(f"  Post verification:   {m2.get('status', 'unknown').upper()}")
+    print(f"  Blockchain anchor:   {'ANCHORED' if m3_upload else 'SKIPPED'}")
+    if args.tamper_test:
+        print(f"  Tamper test:         {'PASSED' if tamper_passed else 'FAILED'}")
+    print()
 
     return 0
 

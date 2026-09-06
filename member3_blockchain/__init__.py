@@ -36,6 +36,7 @@ from member3_blockchain.models import (
     ReverificationResult,
     UploadResult,
 )
+from member3_blockchain.deploy_contract import compile_contract, deploy_contract
 from member3_blockchain.offchain_store import OffchainStore
 from member3_blockchain.reverify_pipeline import ReverificationPipeline, reverify_record
 from member3_blockchain.upload_pipeline import UploadPipeline, upload_verification_record
@@ -48,6 +49,8 @@ __all__ = [
     "reverify_record",
     "UploadPipeline",
     "ReverificationPipeline",
+    "deploy_contract",
+    "compile_contract",
     # Models & Configuration
     "BlockchainConfig",
     "UploadResult",

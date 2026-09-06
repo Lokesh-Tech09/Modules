@@ -18,3 +18,7 @@ member3_blockchain/wallet_secrets/
 *.sqlite*
 member3_blockchain/offchain_store.db
 
+# Live / Temporary Captures
+*live_capture.jpg
+*streamlit_*.jpg
+

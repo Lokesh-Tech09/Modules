@@ -1,12 +1,10 @@
-"""
-VeriFace — Root requirements.txt
-Consolidated dependencies for all three modules + integration layer.
-
-Install with:
-    python -m venv .venv
-    source .venv/bin/activate          # Windows: .venv\\Scripts\\activate
-    pip install -r requirements.txt
-"""
+# VeriFace — Root requirements.txt
+# Consolidated dependencies for all three modules + integration layer.
+#
+# Install with:
+#     python -m venv .venv
+#     source .venv/bin/activate          # Windows: .venv\Scripts\activate
+#     pip install -r requirements.txt
 
 # ── Module 1: Face Identification ──────────────────────────────────────────
 insightface>=0.7.3
@@ -28,14 +26,16 @@ python-dotenv>=1.0.0
 ddgs>=9.0.0                     # Current package name (was: duckduckgo-search)
 duckduckgo-search>=4.0.0        # Legacy name — kept for compatibility
 
+# ── Frontend & Dashboard ──────────────────────────────────────────────────
+streamlit>=1.30.0
+
 # ── Testing ────────────────────────────────────────────────────────────────
 pytest>=7.0.0
 pytest-asyncio>=0.23.0
 
 # ── Optional: Real EVM Blockchain (Sepolia testnet) ───────────────────────
-# Uncomment when BLOCKCHAIN_PROVIDER=sepolia and credentials are configured:
 # web3>=6.0.0
+# py-solc-x>=2.0.2
 
 # ── Optional: SerpAPI Search (paid, requires SERPAPI_KEY in .env) ─────────
-# Uncomment to enable SerpAPI adapter:
 # google-search-results>=2.4.2

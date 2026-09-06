@@ -61,11 +61,17 @@ python main.py --image member1_face/data/input/input.jpg --tamper-test
 ## Usage
 
 ```bash
-# Full E2E pipeline (default input image)
-python main.py --image member1_face/data/input/input.jpg
+# Full E2E pipeline (uses default input image if omitted)
+python main.py --tamper-test
 
-# With tamper detection demo
+# With specific image
 python main.py --image member1_face/data/input/input.jpg --tamper-test
+
+# Capture directly from live webcam
+python main.py --webcam --demo-anchor --tamper-test
+
+# Simulate camera without hardware
+python main.py --mock-camera --demo-anchor --tamper-test
 
 # Provide manual URL (bypass DuckDuckGo search — useful for testing)
 python main.py --image path/to/face.jpg --url https://example.com/post/123
@@ -79,8 +85,19 @@ python main.py --image path/to/face.jpg --max-search-results 3
 # Skip web search entirely
 python main.py --image path/to/face.jpg --no-search
 
-# Legacy E2E demo script
-python pipeline_e2e_demo.py --image member1_face/data/input/input.jpg --tamper-test
+# ── Interactive Web Dashboard (Streamlit) ───────────────────────────
+streamlit run app.py
+
+# ── Standalone Webcam Tool ──────────────────────────────────────────
+python member1_face/capture_webcam.py --mock
+python member1_face/capture_webcam.py --run-pipeline --tamper-test
+
+# ── Smart Contract Deployment (Sepolia) ─────────────────────────────
+python member3_blockchain/deploy_contract.py --dry-run
+
+# ── Presentation Pitch Deck ─────────────────────────────────────────
+# See PITCH_DECK.md for 3-minute hackathon presentation script & Q&A guide
+
 ```
 
 ---

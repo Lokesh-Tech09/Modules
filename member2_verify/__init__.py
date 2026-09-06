@@ -45,6 +45,7 @@ from .models import (
 )
 from .observability import PipelineMetrics, StructuredLogger
 from .post_extractor import PostExtractor
+from .scrapers import SocialPost, SocialScraper, extract_social_posts
 from .security import DomainPolicy, SSRFGuard, SecretScanner, URLSanitizer
 from .verification_pipeline import (
     VerificationPipeline,
@@ -63,6 +64,9 @@ __all__ = [
     "CandidateFetcher",
     "PostExtractor",
     "FaceMatcher",
+    "SocialScraper",
+    "SocialPost",
+    "extract_social_posts",
     "BaseFaceEngine",
     "OpenCVFaceEngine",
     "ContentHashCache",
