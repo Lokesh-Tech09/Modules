@@ -33,6 +33,15 @@ from member2_verify.models import (
 )
 from member2_verify.post_extractor import PostExtractor
 
+# Module 3 imports
+from member3_blockchain import (
+    BlockchainConfig,
+    MockChainClient,
+    OffchainStore,
+    reverify_record,
+    upload_verification_record,
+)
+
 
 # =====================================================================
 # SIMULATED MODULE 1: Face Scan & Embedding Generator
@@ -146,7 +155,7 @@ async def run_module_2(module1_data: dict) -> dict:
 
 
 # =====================================================================
-# SIMULATED MODULE 3: Blockchain Upload & Cryptographic Hashing
+# MODULE 3: Blockchain Upload & Cryptographic Hashing (Our Module)
 # =====================================================================
 def run_module_3(module2_result: dict) -> dict:
     print("\n--- [STEP 3: MODULE 3 — BLOCKCHAIN UPLOAD & HASHING] ---")
@@ -155,46 +164,38 @@ def run_module_3(module2_result: dict) -> dict:
         print("Verification status is NOT 'verified'. Aborting blockchain upload.")
         return {"blockchain_status": "REJECTED"}
 
-    print("1. Validating verification payload schema (version 2.0)... OK")
+    print("1. Initializing isolated sandbox blockchain ledger & off-chain store...")
+    chain_client = MockChainClient(network="sepolia-testnet")
+    store = OffchainStore(db_path=":memory:")
+    config = BlockchainConfig(network="sepolia-testnet")
 
-    match_data = module2_result["match"]
-    local_path = match_data["local_image_path"]
+    print("2. Canonicalizing verification record & computing SHA-256 fingerprint...")
+    upload_result = upload_verification_record(
+        module2_result,
+        config=config,
+        chain_client=chain_client,
+        offchain_store=store,
+    )
 
-    # Step A: Cryptographic SHA-256 hash of matched image
-    with open(local_path, "rb") as f:
-        image_hash = hashlib.sha256(f.read()).hexdigest()
-    print(f"2. Generated Image SHA-256 Hash: {image_hash[:16]}...{image_hash[-8:]}")
+    print("3. Verification record anchored on blockchain:")
+    print(f"   Status: {upload_result.status}")
+    print(f"   Reference ID: {upload_result.reference_id}")
+    print(f"   Record SHA-256 Hash: {upload_result.record_hash}")
+    print(f"   Network: {upload_result.chain.network}")
+    print(f"   Block Number: {upload_result.chain.block_number}")
+    print(f"   Confirmed: {upload_result.chain.confirmed}")
 
-    # Step B: Cryptographic hash of verification claim
-    claim_bytes = json.dumps({
-        "url": match_data["url"],
-        "confidence": module2_result["verification"]["calibrated_confidence"],
-        "consent": module2_result["consent"],
-    }, sort_keys=True).encode()
-    claim_hash = hashlib.sha256(claim_bytes).hexdigest()
-    print(f"3. Generated Claim Metadata Hash: {claim_hash[:16]}...{claim_hash[-8:]}")
+    print("4. Executing immediate re-verification integrity check against blockchain...")
+    reverify_result = reverify_record(
+        reference_id=upload_result.reference_id,
+        chain_client=chain_client,
+        offchain_store=store,
+    )
+    print(f"   Re-verification Status: {reverify_result.status}")
+    print(f"   Integrity Match: {reverify_result.match}")
+    assert reverify_result.match is True, "Re-verification integrity check failed!"
 
-    # Step C: Simulated Blockchain Transaction (Smart Contract State Entry)
-    tx_hash = "0x" + hashlib.sha256((image_hash + claim_hash).encode()).hexdigest()
-    block_entry = {
-        "blockchain_status": "COMMITTED_ON_CHAIN",
-        "block_number": 1048291,
-        "tx_hash": tx_hash,
-        "identity_claim": {
-            "verified_url": match_data["url"],
-            "image_sha256": image_hash,
-            "claim_sha256": claim_hash,
-            "calibrated_confidence": module2_result["verification"]["calibrated_confidence"],
-            "consent_scope": module2_result["consent"]["consent_scope"],
-        },
-        "re_verification_ready": True,
-    }
-
-    print("4. Blockchain Transaction Committed:")
-    print(f"   Block Number: {block_entry['block_number']}")
-    print(f"   Tx Hash: {block_entry['tx_hash']}")
-    print(f"   Re-verification Flag: {block_entry['re_verification_ready']}")
-    return block_entry
+    return upload_result.to_dict()
 
 
 async def main():
